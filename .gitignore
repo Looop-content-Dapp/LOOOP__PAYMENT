@@ -2,7 +2,7 @@
 node_modules/
 npm-debug.log
 yarn-error.log
-package-lock.json  # Optional: Include if you prefer Yarn over npm
+package-lock.json 
 
 # Environment variables
 .env
@@ -32,8 +32,6 @@ Thumbs.db           # Windows
 
 # Editor-specific files
 .vscode/           # VS Code settings
-.idea/             # JetBrains IDEs
-*.sublime-*        # Sublime Text
 
 # MongoDB local data (if applicable)
 data/

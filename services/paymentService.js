@@ -56,7 +56,6 @@ class PaymentService {
       meta: { subscriptionId: subscription._id },
       payment_plan: plan.flutterwavePlanId, // Link to Flutterwave plan
     };
-
     const response = await flw.Charge.card(paymentData);
     if (response.status === 'success') {
       return { paymentLink: response.data.link, subscriptionId: subscription._id, txRef };

@@ -4,6 +4,7 @@ const PaymentService = require('../services/paymentService');
 const BlockchainService = require('../services/blockchainService');
 const Subscription = require('../models/Subscription');
 const Transaction = require('../models/Transaction');
+const Card = require('../models/Card');
 
 router.post('/flutterwave', async (req, res) => {
   const { event, data } = req.body;
@@ -44,6 +45,37 @@ router.post('/flutterwave', async (req, res) => {
 
   res.status(200).send('Webhook received');
 });
+
+router.post('/card', async (req, res) => {
+    const { status, card_id, event } = req.body;
+    try {
+      const card = await Card.findOne({ flutterwaveCardId: card_id });
+      if (!card) {
+        console.error(`Card not found for ID: ${card_id}`);
+        return res.status(200).send('Card webhook received');
+      }
+
+      if (event === 'card.created' && status === 'successful') {
+        card.maskedPan = req.body.card_pan || card.maskedPan;
+        card.status = card.type === 'virtual' ? 'active' : 'pending';
+        await card.save();
+        console.log(`Card ${card_id} created: ${card.type}`);
+      } else if (event === 'card.shipped' && status === 'successful') {
+        card.status = 'shipped';
+        await card.save();
+        console.log(`Physical card ${card_id} shipped`);
+      } else if (event === 'card.activated' && status === 'successful') {
+        card.status = 'active';
+        await card.save();
+        console.log(`Physical card ${card_id} activated`);
+      }
+
+      res.status(200).send('Card webhook received');
+    } catch (error) {
+      console.error('Card webhook error:', error);
+      res.status(200).send('Card webhook received');
+    }
+  });
 
 // Monitor subscriptions for grace period and NFT burning
 setInterval(async () => {
