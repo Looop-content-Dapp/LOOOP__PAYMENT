@@ -1,24 +1,48 @@
-const Flutterwave = require("flutterwave-node-v3");
-const flw = new Flutterwave(
-  process.env.FLW_PUBLIC_KEY,
-  process.env.FLW_SECRET_KEY
-);
-const Plan = require("../models/Plan");
-const Subscription = require("../models/Subscription");
-const Transaction = require("../models/Transaction");
-const { calculateUSDC, generateClaimToken } = require("./blockchainService");
+const Flutterwave = require('flutterwave-node-v3');
+const Transaction = require('../models/Transaction');
+const BlockchainService = require('./BlockchainService');
+const { Plan } = require('../models/plan.model');
+const { Subscription } = require('../models/subscription.model');
+
+const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
 
 class PaymentService {
-  // Create a payment plan for an artist's tribe
+//Create a payment plan for an artist's tribe
   async createPaymentPlan(artistId, tribeId, name, amount, description) {
     const planData = {
       name: `${name} - ${tribeId}`,
       amount,
       interval: "monthly", // Monthly billing
-      currency: "USD",
+      currency: "USD" || "NGN",
     };
 
     const response = await flw.PaymentPlan.create(planData);
+
+    console.log("plan created successfully!");
+    if (response.status === "success") {
+      const plan = await Plan.create({
+        artistId,
+        tribeId,
+        name,
+        amount,
+        description,
+        flutterwavePlanId: response.data.id,
+      });
+
+      return plan;
+    }
+    throw new Error("fail to create a payment plan!");
+  }
+  //Create a payment plan for an artist's tribe
+  async createPaymentPlan(artistId, tribeId, name, amount, description) {
+    const planData = {
+      name: `${name} - ${tribeId}`,
+      amount,
+      interval: "monthly", // Monthly billing
+      currency: "USD" || "NGN",
+    };
+    const response = await flw.PaymentPlan.create(planData);
+    console.log("plan created successfully!");
     if (response.status === "success") {
       const plan = await Plan.create({
         artistId,
@@ -30,14 +54,15 @@ class PaymentService {
       });
       return plan;
     }
-    throw new Error("Failed to create payment plan");
+    throw new Error("fail to create a payment plan!");
   }
 
   // Subscribe a user to an artist's plan
   async createSubscriptionPayment(userId, planId, paymentMethod) {
     const plan = await Plan.findById(planId);
-    if (!plan) throw new Error("Plan not found");
-
+    if (!plan) {
+      throw new Error("plan not found!");
+    }
     const txRef = `sub_${Date.now()}`;
     const subscription = await Subscription.create({
       userId,
@@ -48,20 +73,15 @@ class PaymentService {
       paymentMethod,
       nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     });
-
     const paymentData = {
-      card_number: "5531886652142950",
-      expiry_month: "09",
-      expiry_year: "32",
-      cvv: "564",
       tx_ref: txRef,
       amount: plan.amount,
-      email: `${userId}@example.com`,
-      currency: "USD",
+      currency: "USD" || "NGN",
+      payment_options: paymentMethod === "applepay" ? "applepay" : "card",
+      customer: { email: `${userId}@example.com` }, //customer email will be here
       redirect_url: "http://localhost:8000/payment/callback",
       meta: { subscriptionId: subscription._id },
-      payment_plan: plan.flutterwavePlanId,
-      enckey: process.env.FLW_ENCRYPTION_KEY || "FLWSECK_TEST1363c232db07",
+      payment_plan: plan.flutterwavePlanId, // Link to Flutterwave plan
     };
     const response = await flw.Charge.card(paymentData);
     if (response.status === "success") {
@@ -71,10 +91,8 @@ class PaymentService {
         txRef,
       };
     }
-    throw new Error("Payment initiation failed");
+    throw new Error("Payment initiation failed!");
   }
-
-  // Verify Payment and Activate Subscription
   async verifyPayment(txRef) {
     const response = await flw.Transaction.verify({ id: txRef });
     if (response.status === "success") {
@@ -87,7 +105,6 @@ class PaymentService {
         paymentMethod: response.data.payment_type,
         flutterwaveTxRef: txRef,
       });
-
       if (response.data.meta?.subscriptionId) {
         const subscription = await Subscription.findById(
           response.data.meta.subscriptionId
@@ -96,20 +113,53 @@ class PaymentService {
         subscription.flutterwaveSubscriptionId =
           response.data.payment_plan?.subscription_id || txRef; // Fallback to txRef if no subscription ID
         await subscription.save();
-
         const usdcEquivalent = await calculateUSDC(response.data.amount);
         transaction.usdcEquivalent = usdcEquivalent;
         await transaction.save();
-
-        const claimToken = await generateClaimToken(
-          transaction._id,
-          usdcEquivalent
-        );
-        return { transaction, claimToken, subscription };
+        console.log("token created here");
       }
       return { transaction };
     }
     throw new Error("Payment verification failed");
+  }
+
+  // Subscribe a user to an artist's plan
+  async createSubscriptionPayment(userId, planId, paymentMethod) {
+    const plan = await Plan.findById(planId);
+    if (!plan) {
+      throw new Error("plan not found!");
+    }
+
+    const txRef = `sub_${Date.now()}`;
+    const subscription = await Subscription.create({
+      userId,
+      artistId: plan.artistId,
+      tribeId: plan.tribeId,
+      planId: plan._id,
+      amount: plan.amount,
+      paymentMethod,
+      nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    const paymentData = {
+      tx_ref: txRef,
+      amount: plan.amount,
+      currency: "USD" || "NGN",
+      payment_options: paymentMethod === "applepay" ? "applepay" : "card",
+      customer: { email: `${userId}@example.com` }, //customer email will be here
+      redirect_url: "http://localhost:8000/payment/callback",
+      meta: { subscriptionId: subscription._id },
+      payment_plan: plan.flutterwavePlanId, // Link to Flutterwave plan
+    };
+
+    const response = await flw.Charge.card(paymentData);
+    if (response.status === "success") {
+      return {
+        paymentLink: response.data.link,
+        subscriptionId: subscription._id,
+        txRef,
+      };
+    }
+    throw new Error("Payment initiation failed!");
   }
 
   // Cancel Subscription
@@ -146,20 +196,96 @@ class PaymentService {
     throw new Error("Subscription cannot be renewed");
   }
 
-  // One-Time Payment (Unchanged)
-  async createOneTimePayment(userId, amount, paymentMethod) {
-    const txRef = `one_${Date.now()}`;
-    const paymentData = {
-      tx_ref: txRef,
-      amount,
-      currency: "USD",
-      payment_options: paymentMethod === "applepay" ? "applepay" : "card",
-      customer: { email: `${userId}@example.com` },
-      redirect_url: "http://localhost:3000/payment/callback",
-    };
+  async createOneTimePayment(userId, amount, paymentMethod, walletAddress, blockchain) {
+    try {
+      const txRef = `one_${Date.now()}`;
+      const paymentData = {
+        tx_ref: txRef,
+        amount,
+        currency: 'USD',
+        payment_options: paymentMethod === 'applepay' ? 'applepay' : 'card',
+        customer: { email: `${userId}@example.com` },
+        redirect_url: `http://localhost:${process.env.PORT || 8000}/payment/callback`,
+        meta: { walletAddress, blockchain },
+      };
 
-    const response = await flw.Charge.card(paymentData);
-    return { paymentLink: response.data.link, txRef };
+      const response = await flw.Charge.card(paymentData);
+      if (response.status === 'success') {
+        await Transaction.create({
+          userId,
+          amount,
+          currency: 'USD',
+          usdcEquivalent: 0,
+          transactionHash: '',
+          status: 'pending',
+          paymentMethod,
+          flutterwaveTxRef: txRef,
+          blockchain,
+          title: `Funding wallet on ${blockchain}`,
+          message: 'From card',
+        });
+        return { paymentLink: response.data.link, txRef };
+      }
+      throw new Error('Payment initiation failed');
+    } catch (error) {
+      console.error('Error creating one-time payment:', error);
+      throw error;
+    }
+  }
+
+  async verifyOneTimePayment(txRef) {
+    try {
+      const response = await flw.Transaction.verify({ id: txRef });
+      if (response.status === 'success') {
+        const { walletAddress, blockchain } = response.data.meta;
+        const usdcEquivalent = await BlockchainService.calculateUSDC(response.data.amount);
+
+        try {
+          const transferResult = await BlockchainService.transferUSDC(
+            blockchain,
+            walletAddress,
+            usdcEquivalent
+          );
+          await Transaction.findOneAndUpdate(
+            { flutterwaveTxRef: txRef },
+            {
+              usdcEquivalent,
+              transactionHash: transferResult.txHash,
+              status: 'success',
+              title: `Funded wallet on ${blockchain}`,
+              message: 'From card',
+            },
+            { new: true }
+          );
+        } catch (error) {
+          console.error('Token transfer failed:', error);
+          await this.refund(txRef);
+          throw new Error('Token transfer failed, refund initiated');
+        }
+        return { transaction: await Transaction.findOne({ flutterwaveTxRef: txRef }) };
+      }
+      throw new Error('Payment verification failed');
+    } catch (error) {
+      console.error('Error verifying one-time payment:', error);
+      throw error;
+    }
+  }
+
+  async refund(txRef) {
+    try {
+      const transaction = await Transaction.findOne({ flutterwaveTxRef: txRef });
+      if (transaction && transaction.status === 'pending') {
+        const refundResponse = await flw.Refund.create({ tx_ref: txRef });
+        if (refundResponse.status === 'success') {
+          transaction.status = 'failed';
+          await transaction.save();
+        } else {
+          console.error('Refund failed:', refundResponse);
+        }
+      }
+    } catch (error) {
+      console.error('Error processing refund:', error);
+    }
   }
 }
 

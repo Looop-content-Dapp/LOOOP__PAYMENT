@@ -1,19 +1,20 @@
 const mongoose = require('mongoose');
 
 const TransactionSchema = new mongoose.Schema({
-  userId: { type: String, required: true },
-  artistId: { type: String }, // For artist-related transactions
-  subscriptionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subscription' },
+  userId: { type: String, required: true, index: true },
   amount: { type: Number, required: true },
   currency: { type: String, required: true },
-  usdcEquivalent: { type: Number },
+  usdcEquivalent: { type: Number, required: true },
   transactionHash: { type: String },
-  status: { type: String, enum: ['success', 'pending', 'failed'], default: 'pending' },
-  paymentMethod: { type: String }, // e.g., 'card', 'applepay', 'wallet'
+  status: { type: String, enum: ['pending', 'success', 'failed'], default: 'pending' },
+  paymentMethod: { type: String, enum: ['card', 'applepay'], required: true },
   flutterwaveTxRef: { type: String },
-  type: { type: String, enum: ['funding', 'subscription', 'tribe_join', 'collectible_received'], required: true }, // Transaction type
-  source: { type: String, enum: ['card', 'wallet'], required: true }, // Source of funds
-  blockchain: { type: String, enum: ['StarkNet', 'XION'], required: true }, // Blockchain used
-}, { timestamps: true });
+  type: { type: String, default: 'funding' },
+  source: { type: String, enum: ['card', 'applepay'], default: 'card' },
+  blockchain: { type: String, enum: ['Starknet', 'XION'], required: true },
+  title: { type: String },
+  message: { type: String },
+  createdAt: { type: Date, default: Date.now, index: true },
+});
 
 module.exports = mongoose.model('Transaction', TransactionSchema);

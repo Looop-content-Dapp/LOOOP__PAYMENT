@@ -3,23 +3,27 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon app.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Looop-content-Dapp/LOOOP__PAYMENT.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Looop-content-Dapp/LOOOP__PAYMENT/issues"
+  },
+  "homepage": "https://github.com/Looop-content-Dapp/LOOOP__PAYMENT#readme",
   "description": "",
   "dependencies": {
     "axios": "^1.8.1",
     "dotenv": "^16.4.7",
-    "ethers": "^6.13.5",
     "express": "^4.21.2",
-    "flutterwave-node-v3": "^1.1.14",
-    "mongoose": "^8.10.2",
-    "node-cron": "^3.0.3",
-    "nodemon": "^3.1.9",
+    "flutterwave-node-v3": "^1.1.15",
+    "mongoose": "^8.11.0",
     "starknet": "^6.23.1",
-    "web3": "^4.16.0"
+    "ws": "^8.18.1"
   }
 }
