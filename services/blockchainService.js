@@ -1,4 +1,4 @@
-const { Provider, Account, Contract, ec, constants, RpcProvider } = require('starknet');
+const { Account, Contract, ec, constants, RpcProvider } = require('starknet');
 const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const { SigningStargateClient, coins } = require('@cosmjs/stargate');
 const axios = require('axios');
