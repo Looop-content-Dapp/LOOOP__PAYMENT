@@ -1,38 +1,107 @@
-const Flutterwave = require('flutterwave-node-v3');
-const Transaction = require('../models/Transaction');
-const BlockchainService = require('./BlockchainService');
-const { Plan } = require('../models/plan.model');
-const { Subscription } = require('../models/subscription.model');
+const axios = require("axios");
+require("dotenv").config();
+const CryptoJS = require("crypto-js");
 
-const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
+const FLUTTERWAVE_BASE_URL = "https://api.flutterwave.com/v3"; // Base URL for Flutterwave API
+const FLUTTERWAVE_PUBLIC_KEY = process.env.FLUTTERWAVE_PUBLIC_KEY;
+const FLUTTERWAVE_SECRET_KEY = process.env.FLW_SECRET_KEY;
+const FLUTTERWAVE_ENCRYPTION_KEY = process.env.FLW_ENCRYPTION_KEY;
+
+const Transaction = require("../models/Transaction");
+const BlockchainService = require("./BlockchainService");
+const { Plan } = require("../models/plan.model");
+const { Subscription } = require("../models/subscription.model");
+
+// Function to encrypt data using 3DES
+function encrypt(payload) {
+  const text = JSON.stringify(payload);
+  const forge = require("node-forge");
+  const cipher = forge.cipher.createCipher(
+    "3DES-ECB",
+    forge.util.createBuffer("FLWSECK_TEST1363c232db07")
+  );
+  cipher.start({ iv: "1234567" });
+  cipher.update(forge.util.createBuffer(text, "utf-8"));
+  cipher.finish();
+  const encrypted = cipher.output;
+  console.log("this one", encrypted)
+
+  return forge.util.encode64(encrypted.getBytes()).toString();
+}
+const encryptData = (data) => {
+  const key = CryptoJS.enc.Utf8.parse('FLWSECK_TEST1363c232db07'); // Use your secret key
+  const iv = CryptoJS.enc.Utf8.parse('12345678'); // Initialization vector (IV) - must be 8 bytes
+  const encrypted = CryptoJS.TripleDES.encrypt(JSON.stringify(data), key, {
+      iv: iv,
+      mode: CryptoJS.mode.CBC,
+      padding: CryptoJS.pad.Pkcs7,
+  });
+
+  console.log("encrypted to: ",encrypted.toString())
+  return encrypted.toString();
+
+};
+
+encryptData("data")
+encrypt("data")
+// Function to create a one-time payment
+const createOneTimePayment = async (
+  userId,
+  amount,
+  paymentMethod,
+  walletAddress,
+  blockchain
+) => {
+  const paymentData = {
+    tx_ref: `tx_${Date.now()}`,
+    amount,
+    currency: "USD", // Adjust as necessary
+    payment_type: paymentMethod,
+    email: userId, // Assuming userId is the email for this example
+    redirect_url: "https://your_redirect_url.com", // Set your redirect URL
+    // Add any other necessary fields based on Flutterwave API documentation
+  };
+
+  // Encrypt the payment data
+  const encryptedData = encrypt( paymentData);
+
+  try {
+    const response = await axios.post(
+      `${FLUTTERWAVE_BASE_URL}/charges?type=card`,
+      { data: encryptedData },
+      {
+        headers: {
+          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(`Payment creation failed: ${error.response.data.message}`);
+  }
+};
+
+// Function to verify a one-time payment
+async function verifyOneTimePayment(tx_ref) {
+  try {
+    const response = await axios.get(
+      `${FLUTTERWAVE_BASE_URL}/charges/${tx_ref}`,
+      {
+        headers: {
+          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+        },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      `Payment verification failed: ${error.response.data.message}`
+    );
+  }
+}
 
 class PaymentService {
-//Create a payment plan for an artist's tribe
-  async createPaymentPlan(artistId, tribeId, name, amount, description) {
-    const planData = {
-      name: `${name} - ${tribeId}`,
-      amount,
-      interval: "monthly", // Monthly billing
-      currency: "USD" || "NGN",
-    };
-
-    const response = await flw.PaymentPlan.create(planData);
-
-    console.log("plan created successfully!");
-    if (response.status === "success") {
-      const plan = await Plan.create({
-        artistId,
-        tribeId,
-        name,
-        amount,
-        description,
-        flutterwavePlanId: response.data.id,
-      });
-
-      return plan;
-    }
-    throw new Error("fail to create a payment plan!");
-  }
   //Create a payment plan for an artist's tribe
   async createPaymentPlan(artistId, tribeId, name, amount, description) {
     const planData = {
@@ -41,17 +110,28 @@ class PaymentService {
       interval: "monthly", // Monthly billing
       currency: "USD" || "NGN",
     };
-    const response = await flw.PaymentPlan.create(planData);
+
+    const response = await axios.post(
+      `${FLUTTERWAVE_BASE_URL}/payment-plans`,
+      planData,
+      {
+        headers: {
+          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+        },
+      }
+    );
+
     console.log("plan created successfully!");
-    if (response.status === "success") {
+    if (response.data.status === "success") {
       const plan = await Plan.create({
         artistId,
         tribeId,
         name,
         amount,
         description,
-        flutterwavePlanId: response.data.id,
+        flutterwavePlanId: response.data.data.id,
       });
+
       return plan;
     }
     throw new Error("fail to create a payment plan!");
@@ -83,37 +163,53 @@ class PaymentService {
       meta: { subscriptionId: subscription._id },
       payment_plan: plan.flutterwavePlanId, // Link to Flutterwave plan
     };
-    const response = await flw.Charge.card(paymentData);
-    if (response.status === "success") {
+    const response = await axios.post(
+      `${FLUTTERWAVE_BASE_URL}/charges?type=mobilemoneyghana`,
+      paymentData,
+      {
+        headers: {
+          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+        },
+      }
+    );
+    if (response.data.status === "success") {
       return {
-        paymentLink: response.data.link,
+        paymentLink: response.data.data.link,
         subscriptionId: subscription._id,
         txRef,
       };
     }
     throw new Error("Payment initiation failed!");
   }
+
   async verifyPayment(txRef) {
-    const response = await flw.Transaction.verify({ id: txRef });
-    if (response.status === "success") {
+    const response = await axios.get(
+      `${FLUTTERWAVE_BASE_URL}/transactions/${txRef}/verify`,
+      {
+        headers: {
+          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+        },
+      }
+    );
+    if (response.data.status === "success") {
       const transaction = await Transaction.create({
-        userId: response.data.customer.email.split("@")[0],
-        amount: response.data.amount,
-        currency: response.data.currency,
-        transactionHash: response.data.tx_ref,
+        userId: response.data.data.customer.email.split("@")[0],
+        amount: response.data.data.amount,
+        currency: response.data.data.currency,
+        transactionHash: response.data.data.tx_ref,
         status: "success",
-        paymentMethod: response.data.payment_type,
+        paymentMethod: response.data.data.payment_type,
         flutterwaveTxRef: txRef,
       });
-      if (response.data.meta?.subscriptionId) {
+      if (response.data.data.meta?.subscriptionId) {
         const subscription = await Subscription.findById(
-          response.data.meta.subscriptionId
+          response.data.data.meta.subscriptionId
         );
         subscription.status = "active";
         subscription.flutterwaveSubscriptionId =
-          response.data.payment_plan?.subscription_id || txRef; // Fallback to txRef if no subscription ID
+          response.data.data.payment_plan?.subscription_id || txRef; // Fallback to txRef if no subscription ID
         await subscription.save();
-        const usdcEquivalent = await calculateUSDC(response.data.amount);
+        const usdcEquivalent = await calculateUSDC(response.data.data.amount);
         transaction.usdcEquivalent = usdcEquivalent;
         await transaction.save();
         console.log("token created here");
@@ -123,52 +219,18 @@ class PaymentService {
     throw new Error("Payment verification failed");
   }
 
-  // Subscribe a user to an artist's plan
-  async createSubscriptionPayment(userId, planId, paymentMethod) {
-    const plan = await Plan.findById(planId);
-    if (!plan) {
-      throw new Error("plan not found!");
-    }
-
-    const txRef = `sub_${Date.now()}`;
-    const subscription = await Subscription.create({
-      userId,
-      artistId: plan.artistId,
-      tribeId: plan.tribeId,
-      planId: plan._id,
-      amount: plan.amount,
-      paymentMethod,
-      nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    });
-    const paymentData = {
-      tx_ref: txRef,
-      amount: plan.amount,
-      currency: "USD" || "NGN",
-      payment_options: paymentMethod === "applepay" ? "applepay" : "card",
-      customer: { email: `${userId}@example.com` }, //customer email will be here
-      redirect_url: "http://localhost:8000/payment/callback",
-      meta: { subscriptionId: subscription._id },
-      payment_plan: plan.flutterwavePlanId, // Link to Flutterwave plan
-    };
-
-    const response = await flw.Charge.card(paymentData);
-    if (response.status === "success") {
-      return {
-        paymentLink: response.data.link,
-        subscriptionId: subscription._id,
-        txRef,
-      };
-    }
-    throw new Error("Payment initiation failed!");
-  }
-
   // Cancel Subscription
   async cancelSubscription(subscriptionId) {
     const subscription = await Subscription.findById(subscriptionId);
     if (subscription.flutterwaveSubscriptionId) {
-      await flw.Subscription.cancel({
-        id: subscription.flutterwaveSubscriptionId,
-      });
+      await axios.delete(
+        `${FLUTTERWAVE_BASE_URL}/subscriptions/${subscription.flutterwaveSubscriptionId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+          },
+        }
+      );
     }
     subscription.status = "inactive";
     subscription.gracePeriodEnd = new Date(
@@ -196,97 +258,35 @@ class PaymentService {
     throw new Error("Subscription cannot be renewed");
   }
 
-  async createOneTimePayment(userId, amount, paymentMethod, walletAddress, blockchain) {
-    try {
-      const txRef = `one_${Date.now()}`;
-      const paymentData = {
-        tx_ref: txRef,
-        amount,
-        currency: 'USD',
-        payment_options: paymentMethod === 'applepay' ? 'applepay' : 'card',
-        customer: { email: `${userId}@example.com` },
-        redirect_url: `http://localhost:${process.env.PORT || 8000}/payment/callback`,
-        meta: { walletAddress, blockchain },
-      };
-
-      const response = await flw.Charge.card(paymentData);
-      if (response.status === 'success') {
-        await Transaction.create({
-          userId,
-          amount,
-          currency: 'USD',
-          usdcEquivalent: 0,
-          transactionHash: '',
-          status: 'pending',
-          paymentMethod,
-          flutterwaveTxRef: txRef,
-          blockchain,
-          title: `Funding wallet on ${blockchain}`,
-          message: 'From card',
-        });
-        return { paymentLink: response.data.link, txRef };
-      }
-      throw new Error('Payment initiation failed');
-    } catch (error) {
-      console.error('Error creating one-time payment:', error);
-      throw error;
-    }
-  }
-
-  async verifyOneTimePayment(txRef) {
-    try {
-      const response = await flw.Transaction.verify({ id: txRef });
-      if (response.status === 'success') {
-        const { walletAddress, blockchain } = response.data.meta;
-        const usdcEquivalent = await BlockchainService.calculateUSDC(response.data.amount);
-
-        try {
-          const transferResult = await BlockchainService.transferUSDC(
-            blockchain,
-            walletAddress,
-            usdcEquivalent
-          );
-          await Transaction.findOneAndUpdate(
-            { flutterwaveTxRef: txRef },
-            {
-              usdcEquivalent,
-              transactionHash: transferResult.txHash,
-              status: 'success',
-              title: `Funded wallet on ${blockchain}`,
-              message: 'From card',
-            },
-            { new: true }
-          );
-        } catch (error) {
-          console.error('Token transfer failed:', error);
-          await this.refund(txRef);
-          throw new Error('Token transfer failed, refund initiated');
-        }
-        return { transaction: await Transaction.findOne({ flutterwaveTxRef: txRef }) };
-      }
-      throw new Error('Payment verification failed');
-    } catch (error) {
-      console.error('Error verifying one-time payment:', error);
-      throw error;
-    }
-  }
-
   async refund(txRef) {
     try {
-      const transaction = await Transaction.findOne({ flutterwaveTxRef: txRef });
-      if (transaction && transaction.status === 'pending') {
-        const refundResponse = await flw.Refund.create({ tx_ref: txRef });
-        if (refundResponse.status === 'success') {
-          transaction.status = 'failed';
+      const transaction = await Transaction.findOne({
+        flutterwaveTxRef: txRef,
+      });
+      if (transaction && transaction.status === "pending") {
+        const refundResponse = await axios.post(
+          `${FLUTTERWAVE_BASE_URL}/refunds`,
+          { tx_ref: txRef },
+          {
+            headers: {
+              Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+            },
+          }
+        );
+        if (refundResponse.data.status === "success") {
+          transaction.status = "failed";
           await transaction.save();
         } else {
-          console.error('Refund failed:', refundResponse);
+          console.error("Refund failed:", refundResponse.data);
         }
       }
     } catch (error) {
-      console.error('Error processing refund:', error);
+      console.error("Error processing refund:", error);
     }
   }
 }
 
-module.exports = new PaymentService();
+module.exports = {
+  createOneTimePayment,
+  verifyOneTimePayment,
+};

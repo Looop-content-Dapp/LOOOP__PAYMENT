@@ -1,15 +1,15 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const PaymentService = require('../services/PaymentService');
+const PaymentService = require("../services/paymentService");
 
-router.post('/fund-wallet', async (req, res) => {
+router.post("/fund-wallet", async (req, res) => {
   const { userId, amount, paymentMethod, walletAddress, blockchain } = req.body;
   if (!userId || !amount || !paymentMethod || !walletAddress || !blockchain) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({ error: "Missing required fields" });
   }
   try {
-    if (!['Starknet', 'XION'].includes(blockchain)) {
-      throw new Error('Invalid blockchain specified');
+    if (!["Starknet", "XION"].includes(blockchain)) {
+      throw new Error("Invalid blockchain specified");
     }
     const result = await PaymentService.createOneTimePayment(
       userId,
@@ -24,10 +24,10 @@ router.post('/fund-wallet', async (req, res) => {
   }
 });
 
-router.get('/callback', async (req, res) => {
+router.get("/callback", async (req, res) => {
   const { tx_ref } = req.query;
   if (!tx_ref) {
-    return res.status(400).json({ error: 'tx_ref is required' });
+    return res.status(400).json({ error: "tx_ref is required" });
   }
   try {
     const result = await PaymentService.verifyOneTimePayment(tx_ref);

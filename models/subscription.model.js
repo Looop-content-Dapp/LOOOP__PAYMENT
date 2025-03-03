@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+const mongoose = require("mongoose");
 
 const SubscriptionSchema = new mongoose.Schema(
   {
@@ -30,4 +30,4 @@ const SubscriptionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export const Subscription = mongoose.model("Subscription", SubscriptionSchema);
+module.exports = mongoose.model("Subscription", SubscriptionSchema);
