@@ -1,49 +1,58 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const PaymentService = require('../services/paymentService');
+const PaymentService = require("../services/paymentService");
 
-router.post('/create-plan', async (req, res) => {
-  const { artistId, tribeId, name, amount, description } = req.body;
+
+router.post("/fund-wallet", async (req, res) => {
+  const { userId, amount, paymentMethod, walletAddress, blockchain } = req.body;
+
+  // Validate required fields
+  const missingFields = [];
+  if (!userId) missingFields.push("userId");
+  if (!amount) missingFields.push("amount");
+  if (!paymentMethod) missingFields.push("paymentMethod");
+  if (!walletAddress) missingFields.push("walletAddress");
+  if (!blockchain) missingFields.push("blockchain");
+
+  if (missingFields.length > 0) {
+    return res
+      .status(400)
+      .json({ error: `Missing required fields: ${missingFields.join(", ")}` });
+  }
+
+  // Validate blockchain
+  if (!["Starknet", "XION"].includes(blockchain)) {
+    return res.status(400).json({ error: "Invalid blockchain specified" });
+  }
+
   try {
-    const plan = await PaymentService.createPaymentPlan(artistId, tribeId, name, amount, description);
-    res.json(plan);
+    const result = await PaymentService.createOneTimePayment(
+      userId,
+      amount,
+      paymentMethod,
+      walletAddress,
+      blockchain
+    );
+
+    console.log("this is result", result)
+
+    return res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-router.post('/subscribe', async (req, res) => {
-  const { userId, planId, paymentMethod } = req.body;
+router.get("/callback", async (req, res) => {
+  const { tx_ref } = req.query;
+  if (!tx_ref) {
+    return res.status(400).json({ error: "tx_ref is required" });
+  }
   try {
-    const result = await PaymentService.createSubscriptionPayment(userId, planId, paymentMethod);
+    const result = await PaymentService.verifyOneTimePayment(tx_ref);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});
-
-router.post('/one-time', async (req, res) => {
-  const { userId, amount, paymentMethod } = req.body;
-  const result = await PaymentService.createOneTimePayment(userId, amount, paymentMethod);
-  res.json(result);
-});
-
-router.get('/callback', async (req, res) => {
-  const { tx_ref } = req.query;
-  const result = await PaymentService.verifyPayment(tx_ref);
-  res.json(result);
-});
-
-router.post('/cancel-subscription', async (req, res) => {
-  const { subscriptionId } = req.body;
-  const result = await PaymentService.cancelSubscription(subscriptionId);
-  res.json(result);
-});
-
-router.post('/renew-subscription', async (req, res) => {
-  const { subscriptionId } = req.body;
-  const result = await PaymentService.renewSubscription(subscriptionId);
-  res.json(result);
 });
 
 module.exports = router;
