@@ -24,26 +24,29 @@ function encrypt(payload) {
   cipher.update(forge.util.createBuffer(text, "utf-8"));
   cipher.finish();
   const encrypted = cipher.output;
-  console.log("this one", encrypted)
 
-  return forge.util.encode64(encrypted.getBytes()).toString();
+  const encryptedBase64 = forge.util.encode64(encrypted.getBytes());
+  console.log(
+    "this one",
+    JSON.stringify({ client: encryptedBase64.toString() })
+  );
+  return JSON.stringify({ client: encryptedBase64.toString() });
 }
 const encryptData = (data) => {
-  const key = CryptoJS.enc.Utf8.parse('FLWSECK_TEST1363c232db07'); // Use your secret key
-  const iv = CryptoJS.enc.Utf8.parse('12345678'); // Initialization vector (IV) - must be 8 bytes
+  const key = CryptoJS.enc.Utf8.parse("FLWSECK_TEST1363c232db07"); // Use your secret key
+  const iv = CryptoJS.enc.Utf8.parse("12345678"); // Initialization vector (IV) - must be 8 bytes
   const encrypted = CryptoJS.TripleDES.encrypt(JSON.stringify(data), key, {
-      iv: iv,
-      mode: CryptoJS.mode.CBC,
-      padding: CryptoJS.pad.Pkcs7,
+    iv: iv,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7,
   });
 
-  console.log("encrypted to: ",encrypted.toString())
+  console.log("encrypted to: ", encrypted.toString());
   return encrypted.toString();
-
 };
 
-encryptData("data")
-encrypt("data")
+encryptData("data");
+encrypt("data");
 // Function to create a one-time payment
 const createOneTimePayment = async (
   userId,
@@ -56,29 +59,40 @@ const createOneTimePayment = async (
     tx_ref: `tx_${Date.now()}`,
     amount,
     currency: "USD", // Adjust as necessary
-    payment_type: paymentMethod,
-    email: userId, // Assuming userId is the email for this example
-    redirect_url: "https://your_redirect_url.com", // Set your redirect URL
+    payment_options: "card", // Explicitly set to card payment
+    customer: { email: userId }, // Add customer_email parameter
+    redirect_url: "http://localhost:8000/callback", // Set your redirect URL
     // Add any other necessary fields based on Flutterwave API documentation
   };
 
-  // Encrypt the payment data
-  const encryptedData = encrypt( paymentData);
+  // Encrypt the payment data if needed
+  // const encryptedData = encrypt(paymentData);
 
   try {
     const response = await axios.post(
-      `${FLUTTERWAVE_BASE_URL}/charges?type=card`,
-      { data: encryptedData },
+      `${FLUTTERWAVE_BASE_URL}/payments`,
+      paymentData, // Directly send paymentData as the request body
       {
         headers: {
-          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`, // Use the correct secret key
           "Content-Type": "application/json",
         },
       }
     );
-    return response.data;
+
+    const { data } = response; // Destructure response to get data directly
+
+    if (data.status === "success") {
+      return { paymentLink: data.data.link, tx_ref: paymentData.tx_ref }; // Ensure tx_ref is returned correctly
+    } else {
+      throw new Error(`Payment failed: ${data.message || "Unknown error"}`); // Handle non-success status
+    }
   } catch (error) {
-    throw new Error(`Payment creation failed: ${error.response.data.message}`);
+    throw new Error(
+      `Payment creation failed: ${
+        error.response?.data?.message || error.message
+      }`
+    );
   }
 };
 
@@ -86,17 +100,21 @@ const createOneTimePayment = async (
 async function verifyOneTimePayment(tx_ref) {
   try {
     const response = await axios.get(
-      `${FLUTTERWAVE_BASE_URL}/charges/${tx_ref}`,
+      `${FLUTTERWAVE_BASE_URL}/transactions/${txRef}/verify`,
       {
         headers: {
-          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`, // Use the correct secret key
         },
       }
     );
-    return response.data;
+
+    const { data } = response; // Destructure response to get data directly
+    return data; // Return the response data directly
   } catch (error) {
     throw new Error(
-      `Payment verification failed: ${error.response.data.message}`
+      `Payment verification failed: ${
+        error.response?.data?.message || error.message
+      }`
     );
   }
 }
@@ -158,8 +176,8 @@ class PaymentService {
       amount: plan.amount,
       currency: "USD" || "NGN",
       payment_options: paymentMethod === "applepay" ? "applepay" : "card",
-      customer: { email: `${userId}@example.com` }, //customer email will be here
-      redirect_url: "http://localhost:8000/payment/callback",
+      customer: { email: userId }, //customer email will be here
+      redirect_url: "http://localhost:8000/callback",
       meta: { subscriptionId: subscription._id },
       payment_plan: plan.flutterwavePlanId, // Link to Flutterwave plan
     };
@@ -286,7 +304,10 @@ class PaymentService {
   }
 }
 
+const paymentService = new PaymentService(); // Initialize PaymentService instance
+
 module.exports = {
   createOneTimePayment,
   verifyOneTimePayment,
+  paymentService, // Export the initialized PaymentService instance
 };
