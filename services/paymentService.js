@@ -30,25 +30,48 @@ const createOneTimePayment = async (
     paymentMethod,
     walletAddress,
     blockchain,
-    cardDetails
+    cardDetails,
+    fullname,
+    email,
+    phone_number
   ) => {
     if (paymentMethod !== "card") {
       throw new Error("Only card payments are supported at this time");
     }
 
     const paymentData = {
+      fullname: fullname,
       tx_ref: `tx_${Date.now()}`,
       amount,
       currency: "USD",
-      email: "josephomotade0@gmail.com",
+      email: email,
       redirect_url: "https://your_redirect_url.com",
       meta: { walletAddress, blockchain },
       card_number: cardDetails.card_number,
       cvv: cardDetails.cvv,
       expiry_month: cardDetails.expiry_month,
-      expiry_year: cardDetails.expiry_year
+      expiry_year: cardDetails.expiry_year,
+      card_holder_name: fullname,
+      phone_number: phone_number,
+      authorization: {
+        mode: 'pin',
+      },
     };
-    console.log("card details", cardDetails)
+
+    // Create initial transaction record
+    const transaction = await Transaction.create({
+      userId: userId,
+      amount: amount,
+      currency: "USD",
+      transactionHash: paymentData.tx_ref,
+      status: "pending",
+      paymentMethod: "card",
+      blockchain: blockchain,
+      walletAddress: walletAddress,
+      type: `Funding with ${blockchain}`,
+      source: "card",
+      referenceId: paymentData.tx_ref,
+    });
 
     const encryptedData = encryptData(paymentData);
 
@@ -63,9 +86,18 @@ const createOneTimePayment = async (
           },
         }
       );
-      console.log("Flutterwave response:", response.data);
+
+      // Update transaction with Flutterwave reference
+      transaction.flutterwaveTxRef = response.data.data.flw_ref;
+      await transaction.save();
+
       return response.data;
     } catch (error) {
+      // Update transaction status to failed if payment creation fails
+      transaction.status = "failed";
+      transaction.message = error.response?.data?.message || error.message;
+      await transaction.save();
+
       console.error("Payment creation failed:", error.response?.data || error.message);
       throw new Error(`Payment creation failed: ${error.response?.data?.message || error.message}`);
     }
@@ -73,47 +105,39 @@ const createOneTimePayment = async (
 
 // Verify payment and trigger USDC transfer
 const verifyPayment = async (txRef) => {
+  let transaction;
   try {
-    // Verify the transaction with Flutterwave
-    const response = await axios.get(
-      `${FLUTTERWAVE_BASE_URL}/transactions/${txRef}/verify`,
-      {
-        headers: {
-          Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
-        },
-      }
-    );
+    // Fix the URL query parameter format
+    const response = await axios({
+      method: "get",
+      url: `${FLUTTERWAVE_BASE_URL}/transactions/verify_by_reference?tx_ref=${txRef}`,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${FLUTTERWAVE_SECRET_KEY}`
+      },
+    });
+
+    console.log("Verification response:", response.data);
 
     // Check if payment was successful
     if (response.data.status === "success") {
-      const { walletAddress, blockchain } = response.data.data.meta;
-      const transaction = await Transaction.create({
-        userId: response.data.data.customer.email.split("@")[0], // Extract userId from email
-        amount: response.data.data.amount,
-        currency: response.data.data.currency,
-        transactionHash: response.data.data.tx_ref,
-        status: "success",
-        paymentMethod: response.data.data.payment_type,
-        flutterwaveTxRef: txRef,
-        blockchain,
-        walletAddress,
-      });
-
-      // Calculate USDC equivalent and update transaction
-      const usdcEquivalent = await BlockchainService.calculateUSDC(response.data.data.amount);
-      transaction.usdcEquivalent = usdcEquivalent;
+      transaction.status = "success";
+      transaction.paymentMethod = response.data.data.payment_type;
       await transaction.save();
-
-      // Trigger USDC transfer on the specified blockchain
-      await BlockchainService.transferUSDC(blockchain, walletAddress, usdcEquivalent);
 
       return { transaction };
     } else {
-      throw new Error("Payment verification failed");
+      throw new Error(response.data.message || "Payment verification failed");
     }
   } catch (error) {
     console.error("Error verifying payment:", error);
-    throw new Error("Payment verification failed");
+    // Now transaction is accessible here
+    if (transaction) {
+      transaction.status = "failed";
+      transaction.message = error.response?.data?.message || error.message;
+      await transaction.save();
+    }
+    throw new Error(error.response?.data?.message || error.message);
   }
 };
 

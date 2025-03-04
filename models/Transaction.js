@@ -2,9 +2,10 @@ const mongoose = require('mongoose');
 
 const TransactionSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
+  referenceId: { type: String, unique: false, sparse: false },  // Added referenceId field
   amount: { type: Number, required: true },
   currency: { type: String, required: true },
-  usdcEquivalent: { type: Number, required: true },
+  usdcEquivalent: { type: Number, required: false },
   transactionHash: { type: String },
   status: { type: String, enum: ['pending', 'success', 'failed'], default: 'pending' },
   paymentMethod: { type: String, enum: ['card', 'applepay'], required: true },
