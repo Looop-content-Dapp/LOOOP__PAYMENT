@@ -4,8 +4,32 @@ const { SigningStargateClient, coins } = require('@cosmjs/stargate');
 const axios = require('axios');
 
 // Placeholder values - replace with actual ones
-const USDC_ABI = []; // Obtain from Starknet USDC contract documentation
-const USDC_ADDRESS = '0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d'; // Replace with actual USDC contract address on Starknet
+// Minimal ERC20 ABI with just the transfer function
+const USDC_ABI = [
+  {
+    name: "transfer",
+    type: "function",
+    inputs: [
+      {
+        name: "recipient",
+        type: "felt"
+      },
+      {
+        name: "amount",
+        type: "Uint256"
+      }
+    ],
+    outputs: [
+      {
+        name: "success",
+        type: "felt"
+      }
+    ],
+    stateMutability: "external"
+  }
+];
+
+const USDC_ADDRESS = '0x053b40A647CEDfca6cA84f542A0fe36736031905A9639a7f19A3C1e66bFd5080'; // Replace with actual USDC contract address on Starknet
 const privateKey = process.env.AGENT_WALLET_STARKNET_PRIVATE_KEY;
 const accountAddress = process.env.AGENT_WALLET_STARKNET_ADDRESS;
 
